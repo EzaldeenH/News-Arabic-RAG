@@ -1,0 +1,23 @@
+# ===========================================
+# Arabic QA Backend - Development Requirements
+# ===========================================
+# Install with: pip install -r requirements-dev.txt
+# ===========================================
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+
+# Code Quality
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+isort==5.13.2
+
+# Debugging
+pdbpp==0.10.3
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.5.3

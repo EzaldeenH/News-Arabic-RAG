@@ -1,0 +1,35 @@
+# ===========================================
+# Arabic QA Backend - Requirements
+# ===========================================
+# Install with: pip install -r requirements.txt
+# ===========================================
+
+# FastAPI & Web Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# Vector Database
+qdrant-client
+
+# Embeddings & NLP
+sentence-transformers
+camel-tools
+
+# Web Scraping
+beautifulsoup4
+requests
+
+# HTTP Client
+httpx
+
+# Utilities
+python-multipart
+lxml
+
+# ===========================================
+# Development (Optional)
+# Install with: pip install -r requirements-dev.txt
+# ===========================================
+
