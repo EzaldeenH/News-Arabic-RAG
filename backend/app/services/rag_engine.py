@@ -4,6 +4,7 @@ Handles vector search, context retrieval, and LLM generation.
 """
 import time
 import re
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, Filter, FieldCondition, MatchValue, MatchAny
@@ -13,6 +14,8 @@ import json
 
 from app.core.config import settings
 from app.models.schemas import QueryFilters, SourceDocument
+
+logger = logging.getLogger(__name__)
 
 
 class RAGEngine:
@@ -146,19 +149,20 @@ class RAGEngine:
         if entities:
             entities_str = f"\nالكيانات المستخرجة: {', '.join(entities)}"
         
-        prompt = f"""أنت مساعد ذكي متخصص في أخبار **الشرق الأوسط** والاقتصاد الإقليمي.
+        prompt = f"""أنت مساعد ذكي متخصص في أخبار الجزيرة نت والشرق الأوسط.
 
 السؤال: {question}
 
+السياق المتوفر:
 {context_text}
 {entities_str}
 
-تعليمات:
-- أجب على السؤال مستخدماً المعلومات المتوفرة في السياق المقدم فقط.
-- إذا كان السياق يحتوي على معلومات مفيدة أو ذات صلة بالسؤال (حتى لو كانت جزئية)، قم بصياغة إجابة منها.
-- فقط إذا كان السياق لا يمت بصلة إطلاقاً للسؤال، قل 'لا أملك معلومات كافية'.
-- الإجابة يجب أن تكون باللغة العربية الفصحى.
-- اذكر المصادر أو أسماء الجهات عند الاقتضاء.
+تعليمات العمل:
+1. استخدم **السياق المتوفر فقط** للإجابة.
+2. فكر في السؤال بعمق وحلل المعلومات الموجودة في السياق.
+3. إذا وجدت معلومات ذات صلة (حتى لو كانت بسيطة)، قم بصياغة إجابة مفيدة ودقيقة.
+4. إذا لم يمت السياق بصلة للسؤال، قل فقط 'لا أملك معلومات كافية'.
+5. أجب باللغة العربية الفصحى وبأسلوب إخباري رصين.
 
 الإجابة:"""
         
@@ -177,24 +181,10 @@ class RAGEngine:
             }
         }
         
-
         response = requests.post(url, json=payload, timeout=settings.llm_timeout)
         response.raise_for_status()
         result = response.json()
-        raw_response = result.get("response", "")
-        
-        # Extract and log thinking process for models like qwen3.5:9b
-        think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
-        match = think_pattern.search(raw_response)
-        
-        if match:
-            thinking_process = match.group(1).strip()
-            logger.info(f"\n--- LLM Thinking Process ---\n{thinking_process}\n----------------------------\n")
-            # Remove the think block from the final output
-            clean_response = think_pattern.sub("", raw_response).strip()
-            return clean_response
-            
-        return raw_response
+        return result.get("response", "").strip()
     
     def _extract_entities_from_response(self, answer: str) -> List[str]:
         """
