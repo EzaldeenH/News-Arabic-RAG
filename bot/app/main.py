@@ -17,8 +17,9 @@ from bot.app.handlers.message_handlers import router
 load_dotenv()
 
 # Configure logging
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
@@ -49,7 +50,8 @@ async def main():
     # Bot startup handler
     @dp.startup()
     async def on_startup(bot: Bot):
-        logger.info(f"Bot started: @{bot.me.username}")
+        bot_user = await bot.get_me()
+        logger.info(f"Bot started: @{bot_user.username}")
     
     # Bot shutdown handler
     @dp.shutdown()

@@ -2,11 +2,21 @@
 FastAPI Main Application.
 Arabic QA System - Middle East Focus
 """
+import sys
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import query, ingestion, health
 from app.core.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout
+)
+
+from app.routers import query, ingestion, health
 
 
 def create_app() -> FastAPI:
@@ -40,7 +50,6 @@ def create_app() -> FastAPI:
         return {
             "service": "Arabic QA System",
             "version": "1.0.0",
-            "region_focus": settings.default_region,
             "docs": "/docs"
         }
     

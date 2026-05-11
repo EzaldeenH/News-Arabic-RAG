@@ -10,8 +10,11 @@ import requests
 from bs4 import BeautifulSoup
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
+import logging
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ArabicTextNormalizer:
@@ -294,7 +297,7 @@ class DataIngestor:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=settings.request_timeout)
         response.encoding = 'utf-8'  # Force UTF-8 encoding
         response.raise_for_status()
         
@@ -325,16 +328,28 @@ class DataIngestor:
     def ingest(
         self,
         url: str,
-        region: str = "Middle East",
-        category: str = "News"
+        main_category: str = "أخبار",
+        subcategory: str = "عربي",
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        author: Optional[str] = None,
+        date: Optional[str] = None,
+        source_name: str = "Al Jazeera Arabic",
+        extra_metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Ingest content from a URL into the vector database.
         
         Args:
             url: URL to scrape and ingest
-            region: Region tag for metadata filtering
-            category: Category tag for metadata filtering
+            main_category: Main category tag for metadata filtering
+            subcategory: Subcategory tag for metadata filtering
+            title: Optional pre-scraped title
+            content: Optional pre-scraped content
+            author: Optional author name
+            date: Optional publication date
+            source_name: Source name (default: Al Jazeera)
+            extra_metadata: Any additional fields to store
             
         Returns:
             Ingestion statistics
@@ -344,14 +359,26 @@ class DataIngestor:
         # Extract domain for title fallback
         domain = urlparse(url).netloc
         
-        # Scrape content
-        raw_text = self.scrape_url(url)
+        # Use provided content or scrape
+        if content:
+            raw_text = content
+            logger.info(f"Using provided content for {url} ({len(raw_text)} chars).")
+        else:
+            logger.info(f"Scraping content from {url}...")
+            raw_text = self.scrape_url(url)
+            logger.info(f"Successfully scraped {len(raw_text)} characters.")
+        
+        # Use provided title or fallback
+        if not title:
+            # Simple title extraction from raw_text or domain
+            title = f"{domain} - {url.split('/')[-1] or 'Article'}"
         
         # Normalize text
         normalized_text = self.normalizer.normalize(raw_text)
         
         # Chunk text
         chunks = self.chunker.chunk(normalized_text)
+        logger.info(f"Chunked text into {len(chunks)} parts.")
         
         # Process each chunk
         total_entities = 0
@@ -369,12 +396,19 @@ class DataIngestor:
             payload = {
                 "text": chunk,
                 "url": url,
-                "title": f"{domain} - Chunk {i+1}",
-                "region": region,
-                "category": category,
+                "title": title,
+                "main_category": main_category,
+                "subcategory": subcategory,
+                "author": author or "الجزيرة نت",
+                "date": date or "",
+                "source": source_name,
                 "entities": entities,
                 "chunk_index": i
             }
+            
+            # Merge extra metadata if provided
+            if extra_metadata:
+                payload.update(extra_metadata)
             
             points.append({
                 "id": f"{domain}_{i}_{int(time.time())}",
@@ -386,9 +420,11 @@ class DataIngestor:
         from qdrant_client.http import models
         from qdrant_client.http.models import PointStruct
         
+        import uuid
+        
         qdrant_points = [
             PointStruct(
-                id=i,
+                id=str(uuid.uuid4()),
                 vector=p["vector"],
                 payload=p["payload"]
             )
@@ -399,6 +435,7 @@ class DataIngestor:
             collection_name=self.collection_name,
             points=qdrant_points
         )
+        logger.info(f"Upserted {len(qdrant_points)} vectors into Qdrant collection '{self.collection_name}'. Total entities extracted: {total_entities}.")
         
         return {
             "status": "success",

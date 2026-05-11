@@ -25,19 +25,20 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="BAAI/bge-m3", env="EMBEDDING_MODEL")
 
     # Regional Configuration
-    default_region: str = Field(default="Middle East", env="DEFAULT_REGION")
     enable_graph_extract: bool = Field(default=False, env="ENABLE_GRAPH_EXTRACT")
 
     # Ingestion Configuration
     chunk_size: int = Field(default=500, env="CHUNK_SIZE")
     chunk_overlap: int = Field(default=50, env="CHUNK_OVERLAP")
-    default_top_k: int = Field(default=3, env="DEFAULT_TOP_K")
+    default_top_k: int = Field(default=5, env="DEFAULT_TOP_K")
+    request_timeout: int = Field(default=30, env="REQUEST_TIMEOUT")
+    llm_timeout: int = Field(default=300, env="LLM_TIMEOUT")
 
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
 
     class Config:
-        env_file = ".env"
+        env_file = (".env", "../.env")
         case_sensitive = False
         extra = "ignore"  # Ignore extra fields not defined in the model
 

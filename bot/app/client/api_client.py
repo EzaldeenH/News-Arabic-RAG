@@ -25,8 +25,7 @@ class BackendClient:
     def __init__(self):
         if self._client is None:
             self.base_url = os.getenv("BACKEND_URL", "http://backend:8000")
-            self.default_region = os.getenv("DEFAULT_REGION", "Middle East")
-            self.timeout = 60  # seconds
+            self.timeout = int(os.getenv("API_TIMEOUT", "60"))
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 timeout=httpx.Timeout(self.timeout)
@@ -42,14 +41,16 @@ class BackendClient:
     async def query(
         self,
         question: str,
-        top_k: int = 3
+        main_category: Optional[str] = None,
+        subcategory: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Send a query to the backend API.
         
         Args:
             question: The Arabic question
-            top_k: Number of results to retrieve
+            main_category: Optional main category filter
+            subcategory: Optional subcategory filter
             
         Returns:
             API response as dictionary
@@ -62,10 +63,9 @@ class BackendClient:
         payload = {
             "question": question,
             "filters": {
-                "region": self.default_region,
-                "category": "News"
-            },
-            "top_k": top_k
+                "main_category": main_category,
+                "subcategory": subcategory
+            }
         }
         
         response = await client.post(

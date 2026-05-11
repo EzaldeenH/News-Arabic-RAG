@@ -30,8 +30,8 @@ async def query_endpoint(request: QueryRequest):
     Answer an Arabic question using RAG.
     
     - **question**: The Arabic question to answer
-    - **filters**: Optional metadata filters (region, category)
-    - **top_k**: Number of top results to retrieve (default: 3)
+    - **filters**: Optional metadata filters (main_category, subcategory)
+    - **top_k**: Number of top results to retrieve
     
     Returns the answer, sources, entities found, and latency.
     """

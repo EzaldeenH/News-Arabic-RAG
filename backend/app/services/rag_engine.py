@@ -6,7 +6,7 @@ import time
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, Filter, FieldCondition, MatchValue, MatchAny
 from sentence_transformers import SentenceTransformer
 import requests
 import json
@@ -77,18 +77,19 @@ class RAGEngine:
             return None
         
         conditions = []
-        if filters.region:
+        if filters.main_category:
             conditions.append(
                 FieldCondition(
-                    key="region",
-                    match=MatchValue(value=filters.region)
+                    key="main_category",
+                    match=MatchValue(value=filters.main_category)
                 )
             )
-        if filters.category:
+        
+        if filters.subcategory:
             conditions.append(
                 FieldCondition(
-                    key="category",
-                    match=MatchValue(value=filters.category)
+                    key="subcategory",
+                    match=MatchValue(value=filters.subcategory)
                 )
             )
         
@@ -103,16 +104,16 @@ class RAGEngine:
         top_k: int
     ) -> List[Dict[str, Any]]:
         """Search vector DB with optional metadata filtering."""
-        results = self.qdrant_client.search(
+        results = self.qdrant_client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_embedding,
+            query=query_embedding,
             query_filter=filters,
             limit=top_k,
             with_payload=True
         )
         
         documents = []
-        for result in results:
+        for result in results.points:
             payload = result.payload
             documents.append({
                 "text": payload.get("text", ""),
@@ -153,10 +154,11 @@ class RAGEngine:
 {entities_str}
 
 تعليمات:
-- أجيب على السؤال بناءً على السياق المقدم فقط.
-- إذا لم تكن الإجابة في السياق، قل 'لا أملك معلومات كافية'.
+- أجب على السؤال مستخدماً المعلومات المتوفرة في السياق المقدم فقط.
+- إذا كان السياق يحتوي على معلومات مفيدة أو ذات صلة بالسؤال (حتى لو كانت جزئية)، قم بصياغة إجابة منها.
+- فقط إذا كان السياق لا يمت بصلة إطلاقاً للسؤال، قل 'لا أملك معلومات كافية'.
 - الإجابة يجب أن تكون باللغة العربية الفصحى.
-- ذكر المصادر عند الاقتضاء.
+- اذكر المصادر أو أسماء الجهات عند الاقتضاء.
 
 الإجابة:"""
         
@@ -175,10 +177,24 @@ class RAGEngine:
             }
         }
         
-        response = requests.post(url, json=payload, timeout=120)
+
+        response = requests.post(url, json=payload, timeout=settings.llm_timeout)
         response.raise_for_status()
         result = response.json()
-        return result.get("response", "")
+        raw_response = result.get("response", "")
+        
+        # Extract and log thinking process for models like qwen3.5:9b
+        think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+        match = think_pattern.search(raw_response)
+        
+        if match:
+            thinking_process = match.group(1).strip()
+            logger.info(f"\n--- LLM Thinking Process ---\n{thinking_process}\n----------------------------\n")
+            # Remove the think block from the final output
+            clean_response = think_pattern.sub("", raw_response).strip()
+            return clean_response
+            
+        return raw_response
     
     def _extract_entities_from_response(self, answer: str) -> List[str]:
         """
@@ -206,22 +222,20 @@ class RAGEngine:
         Args:
             question: The Arabic question
             filters: Optional metadata filters
-            top_k: Number of results to retrieve
+            top_k: Number of results to retrieve (uses default if None)
             
         Returns:
             Tuple of (answer, sources, entities, latency_ms)
         """
         start_time = time.time()
         
-        # Use default top_k if not specified
         if top_k is None:
             top_k = settings.default_top_k
         
-        # Apply default region filter if none provided
+        # Use defaults only if nothing is provided at all
         if filters is None:
-            filters = QueryFilters(region=settings.default_region)
-        elif filters.region is None:
-            filters.region = settings.default_region
+            # We don't force filters anymore, allowing global search
+            filters = QueryFilters()
         
         # Embed and search
         query_embedding = self._embed_query(question)
@@ -257,8 +271,11 @@ class RAGEngine:
             SourceDocument(
                 url=doc["url"],
                 title=doc["title"],
-                region=doc.get("region"),
-                category=doc.get("category")
+                main_category=doc.get("main_category"),
+                subcategory=doc.get("subcategory"),
+                author=doc.get("author"),
+                date=doc.get("date"),
+                source=doc.get("source", "Al Jazeera Arabic")
             )
             for doc in documents
             if doc.get("url")

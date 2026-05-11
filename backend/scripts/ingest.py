@@ -4,8 +4,8 @@ Data Ingestion CLI Script.
 Ingests Arabic news articles into the vector database.
 
 Usage:
-    python ingest.py --source reuters --max-articles 10
-    python ingest.py --url https://www.reuters.com/world/middle-east/article
+    python ingest.py --source aljazeera --max-articles 10
+    python ingest.py --url https://www.aljazeera.net/news/2026/5/10/article-slug
     python ingest.py --batch urls.txt
 """
 import argparse
@@ -18,11 +18,12 @@ from typing import List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.data_ingestion import DataIngestor, ArabicTextNormalizer, EntityExtractor
-from app.services.scrapers.reuters import ArabicNewsScraper, ReutersScraper
+from app.services.scrapers.aljazeera import ArabicNewsScraper, AlJazeeraScraper
 from app.core.config import settings
 
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
@@ -31,27 +32,29 @@ logger = logging.getLogger(__name__)
 def ingest_from_source(
     source: str,
     max_articles: int,
-    region: str,
-    category: str
+    main_category: str,
+    subcategory: str,
+    categories: Optional[List[str]] = None,
 ) -> dict:
     """
     Ingest articles from a news source.
     
     Args:
-        source: News source name (reuters, alarabiya, etc.)
-        max_articles: Maximum number of articles to ingest
-        region: Region tag
-        category: Category tag
+        source: News source name (aljazeera)
+        max_articles: Maximum number of articles per subcategory to ingest
+        main_category: Main category tag (overridden by auto-detection)
+        subcategory: Subcategory tag (overridden by auto-detection)
+        categories: Optional list of main categories to scrape
         
     Returns:
         Ingestion statistics
     """
-    logger.info(f"Starting ingestion from {source} (max: {max_articles} articles)")
+    logger.info(f"Starting ingestion from {source} (max: {max_articles} articles per subcategory)")
     
     ingestor = DataIngestor()
     scraper = ArabicNewsScraper(source=source)
     
-    articles = scraper.scrape(max_articles=max_articles)
+    articles = scraper.scrape(max_articles=max_articles, categories=categories)
     
     if not articles:
         logger.warning("No articles found")
@@ -75,11 +78,20 @@ def ingest_from_source(
             extractor = EntityExtractor()
             entities = extractor.extract_values(normalized_text)
             
+            # Use auto-detected metadata from the article, fallback to CLI args
+            art_main = article.get("main_category", main_category)
+            art_sub = article.get("subcategory", subcategory)
+
             # Store in vector DB
             result = ingestor.ingest(
                 url=article.get('url', ''),
-                region=region,
-                category=category
+                main_category=art_main,
+                subcategory=art_sub,
+                title=article.get('title'),
+                content=article.get('content'),
+                author=article.get('author'),
+                date=article.get('date'),
+                source_name=article.get('source', 'Al Jazeera Arabic')
             )
             
             total_chunks += result.get('chunks_processed', 0)
@@ -100,16 +112,16 @@ def ingest_from_source(
 
 def ingest_url(
     url: str,
-    region: str,
-    category: str
+    main_category: str,
+    subcategory: str
 ) -> dict:
     """
     Ingest a single URL.
     
     Args:
         url: URL to ingest
-        region: Region tag
-        category: Category tag
+        main_category: Main category tag
+        subcategory: Subcategory tag
         
     Returns:
         Ingestion statistics
@@ -119,7 +131,7 @@ def ingest_url(
     ingestor = DataIngestor()
     
     try:
-        result = ingestor.ingest(url=url, region=region, category=category)
+        result = ingestor.ingest(url=url, main_category=main_category, subcategory=subcategory)
         logger.info(f"Successfully ingested: {result}")
         return result
     except Exception as e:
@@ -129,16 +141,16 @@ def ingest_url(
 
 def ingest_batch(
     file_path: str,
-    region: str,
-    category: str
+    main_category: str,
+    subcategory: str
 ) -> dict:
     """
     Ingest URLs from a file (one URL per line).
     
     Args:
         file_path: Path to file containing URLs
-        region: Region tag
-        category: Category tag
+        main_category: Main category tag
+        subcategory: Subcategory tag
         
     Returns:
         Ingestion statistics
@@ -157,7 +169,7 @@ def ingest_batch(
     results = []
     for i, url in enumerate(urls, 1):
         logger.info(f"[{i}/{len(urls)}] Processing: {url}")
-        result = ingest_url(url, region, category)
+        result = ingest_url(url, main_category, subcategory)
         results.append(result)
     
     return {
@@ -173,9 +185,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --source reuters --max-articles 10
-  %(prog)s --url https://www.reuters.com/world/middle-east/article
-  %(prog)s --batch urls.txt --region "Middle East" --category "News"
+  %(prog)s --source aljazeera --max-articles 10
+  %(prog)s --source aljazeera --max-articles 5 --categories أخبار اقتصاد
+  %(prog)s --url https://www.aljazeera.net/news/2026/5/10/article-slug
+  %(prog)s --batch urls.txt --main-category "أخبار" --subcategory "عربي"
         """
     )
     
@@ -184,7 +197,7 @@ Examples:
     source_group.add_argument(
         "--source",
         type=str,
-        choices=["reuters", "reuters_arabic"],
+        choices=["aljazeera"],
         help="News source to scrape"
     )
     source_group.add_argument(
@@ -203,19 +216,26 @@ Examples:
         "--max-articles",
         type=int,
         default=10,
-        help="Maximum number of articles to scrape (default: 10)"
+        help="Maximum number of articles per subcategory to scrape (default: 10)"
     )
     parser.add_argument(
-        "--region",
+        "--main-category",
         type=str,
-        default="Middle East",
-        help="Region tag for metadata (default: 'Middle East')"
+        default="أخبار",
+        help="Main category tag for metadata (default: 'أخبار')"
     )
     parser.add_argument(
-        "--category",
+        "--subcategory",
         type=str,
-        default="News",
-        help="Category tag for metadata (default: 'News')"
+        default="عربي",
+        help="Subcategory tag for metadata (default: 'عربي')"
+    )
+    parser.add_argument(
+        "--categories",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Main categories to scrape (Arabic: أخبار اقتصاد رأي ميدان متخصصة محليات)"
     )
     
     args = parser.parse_args()
@@ -223,10 +243,10 @@ Examples:
     # Print configuration
     print(f"""
 ╔══════════════════════════════════════════════════════════╗
-║           Arabic QA System - Data Ingestion              ║
+║       Al Jazeera Arabic QA - Data Ingestion              ║
 ╠══════════════════════════════════════════════════════════╣
-║  Region:    {args.region:<42} ║
-║  Category:  {args.category:<42} ║
+║  Main Cat:  {args.main_category:<42} ║
+║  Subcat:    {args.subcategory:<42} ║
 ╚══════════════════════════════════════════════════════════╝
     """)
     
@@ -235,20 +255,21 @@ Examples:
         stats = ingest_from_source(
             source=args.source,
             max_articles=args.max_articles,
-            region=args.region,
-            category=args.category
+            main_category=args.main_category,
+            subcategory=args.subcategory,
+            categories=args.categories,
         )
     elif args.url:
         stats = ingest_url(
             url=args.url,
-            region=args.region,
-            category=args.category
+            main_category=args.main_category,
+            subcategory=args.subcategory
         )
     elif args.batch:
         stats = ingest_batch(
             file_path=args.batch,
-            region=args.region,
-            category=args.category
+            main_category=args.main_category,
+            subcategory=args.subcategory
         )
     else:
         parser.print_help()
